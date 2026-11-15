@@ -1,0 +1,22 @@
+[Unit]
+Description=TFWatch HTTP server
+After=network.target
+
+[Service]
+User=tfwatch
+Group=tfwatch
+WorkingDirectory=/opt/tfwatch/backend
+EnvironmentFile=/etc/tfwatch.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+StateDirectory=tfwatch
+StateDirectoryMode=0750
+ExecStart=/opt/tfwatch/.venv/bin/uvicorn tfwatch.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target
