@@ -34,7 +34,7 @@ def watch_invites(sessions, stop):
                 if job:
                     code, lease = job
                     record_check(sessions, code, lease, check(http, code), now(), enqueue)
-                stop.wait(1 if job else 3)
+                stop.wait(1)
             except SQLAlchemyError:
                 logger.error("Check database operation failed; retrying")
                 stop.wait(10)

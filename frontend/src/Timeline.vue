@@ -5,7 +5,7 @@ import { api } from './api'
 import { dateLabel, durationLabel, states } from './format'
 import StatusPill from './StatusPill.vue'
 
-const props = defineProps({ code: { type: String, required: true } })
+const props = defineProps({ code: { type: String, required: true }, checkedAt: Number })
 const range = ref('30')
 const data = ref(null)
 const busy = ref(false)
@@ -13,7 +13,7 @@ const paging = ref(false)
 const error = ref('')
 const moreError = ref('')
 
-watch([() => props.code, range], async (_, __, onCleanup) => {
+watch([() => props.code, () => props.checkedAt, range], async (_, __, onCleanup) => {
   const abort = new AbortController()
   onCleanup(() => abort.abort())
   busy.value = true

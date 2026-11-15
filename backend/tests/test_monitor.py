@@ -88,16 +88,10 @@ def test_shared_catalog_claims_and_public_timeline(app, client, monkeypatch):
     assert [event["status"] for event in summary["events"]] == ["closed", "open", "unknown", "open"]
 
 
-def test_many_submissions_are_staggered_and_claimed_when_due(app, client, monkeypatch):
+def test_many_submissions_are_due_immediately_and_later_checks_are_staggered(app, client, monkeypatch):
     timestamp = now()
-    offsets = iter(range(20, 4, -1))
-
-    def draw_offset(low, high):
-        assert (low, high) == (0, 30)
-        return next(offsets)
-
     monkeypatch.setattr("tfwatch.catalog.now", lambda: timestamp)
-    monkeypatch.setattr("tfwatch.checks.randint", draw_offset)
+    monkeypatch.setattr("tfwatch.checks.randint", lambda low, high: high)
     register(client)
     codes = [f"Queue{i:03d}" for i in range(16)]
     for code in codes:
@@ -106,15 +100,15 @@ def test_many_submissions_are_staggered_and_claimed_when_due(app, client, monkey
         assert not response.json()["duplicate"]
 
     sessions = app.state.sessions
-    assert claim_invite(sessions, timestamp + 4) is None
-    code, lease = claim_invite(sessions, timestamp + 5)
-    assert code == codes[-1]
-    monkeypatch.setattr("tfwatch.checks.randint", lambda low, high: high)
-    assert record_check(sessions, code, lease, Observation("open"), timestamp + 5)
+    assert claim_invite(sessions, timestamp - 1) is None
+    code, lease = claim_invite(sessions, timestamp)
+    assert code == codes[0]
+    assert record_check(sessions, code, lease, Observation("open"), timestamp)
+    duplicate = client.post("/api/apps", json={"url": f"https://testflight.apple.com/join/{code}"})
+    assert duplicate.json()["duplicate"]
     with sessions() as session:
-        assert session.get(Invite, code).due_at == timestamp + 5 + 300 + 30
-    assert claim_invite(sessions, timestamp + 5) is None
-    assert claim_invite(sessions, timestamp + 6)[0] == codes[-2]
+        assert session.get(Invite, code).due_at == timestamp + 300 + 30
+    assert claim_invite(sessions, timestamp)[0] == codes[1]
 
 
 def test_time_gap_does_not_count_as_open_duration():

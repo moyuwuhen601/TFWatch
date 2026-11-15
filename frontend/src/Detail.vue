@@ -39,18 +39,53 @@ watch([() => props.id, () => session.user?.id, reload], async (_, __, onCleanup)
 
 watch(current, () => { actionError.value = '' })
 
+watch([() => current.value?.code, () => current.value?.checked_at], ([code, checkedAt], _, onCleanup) => {
+  if (!code || checkedAt != null) return
+
+  const abort = new AbortController()
+  const id = props.id
+  const started = Date.now()
+  let timer
+  onCleanup(() => {
+    abort.abort()
+    clearTimeout(timer)
+  })
+
+  async function refresh() {
+    try {
+      const updated = await api('/apps/' + id, { signal: abort.signal })
+      if (abort.signal.aborted || props.id !== id || current.value?.code !== code) return
+      const invite = updated.invites.find(item => item.code === code)
+      if (!invite) return
+      if (invite.checked_at != null) {
+        app.value.name = updated.name
+        app.value.icon = updated.icon
+        current.value.status = invite.status
+        current.value.checked_at = invite.checked_at
+        return
+      }
+    } catch (err) {
+      if (abort.signal.aborted || [401, 403, 404].includes(err.status)) return
+    }
+    timer = setTimeout(refresh, Date.now() - started < 30000 ? 1000 : 5000)
+  }
+
+  timer = setTimeout(refresh, 1000)
+})
+
 async function toggleFollow() {
   if (!session.user) {
     await router.push({ path: '/login', query: { next: route.fullPath } })
     return
   }
   const invite = current.value
+  const checkedAt = invite.checked_at
   followBusy.value = true
   actionError.value = ''
   try {
     const result = await api('/invites/' + invite.code + '/follow', { method: invite.followed ? 'DELETE' : 'PUT' })
     invite.followed = !!result
-    if (result) invite.status = result.status
+    if (result && invite.checked_at === checkedAt) invite.status = result.status
   } catch (err) {
     actionError.value = err.message
   } finally {
@@ -82,7 +117,7 @@ function added() {
     </section>
     <section class="panel invites-panel">
       <div class="section-heading compact">
-        <div><div class="section-icon"><Link :size="19" /></div><div><h2>公开邀请</h2><p v-if="current">{{ current.checked_at == null ? '正在等待首次检测' : '最近检测 · ' + dateLabel(current.checked_at) }}</p></div></div>
+        <div><div class="section-icon"><Link :size="19" /></div><div><h2>公开邀请</h2><p v-if="current" aria-live="polite">{{ current.checked_at == null ? '正在等待首次检测' : '最近检测 · ' + dateLabel(current.checked_at) }}</p></div></div>
         <button v-if="session.user" type="button" class="btn btn-secondary btn-small" :aria-expanded="showAdd" @click="showAdd = !showAdd"><Plus :size="17" /> 添加邀请</button>
       </div>
       <InviteForm v-if="showAdd" :app-id="app.id" @cancel="showAdd = false" @submitted="added" />
@@ -93,7 +128,7 @@ function added() {
       </div>
       <p v-if="actionError" class="feedback error" role="alert">{{ actionError }}</p>
     </section>
-    <Timeline v-if="current" :code="current.code" />
+    <Timeline v-if="current" :code="current.code" :checked-at="current.checked_at" />
   </template>
 </template>
 

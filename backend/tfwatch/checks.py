@@ -5,10 +5,6 @@ from sqlalchemy import select, update
 from .models import App, CheckLog, Invite, Settings, StatusEvent
 
 
-def first_check_due(timestamp):
-    return timestamp + randint(0, 30)
-
-
 def claim_invite(sessions, timestamp):
     due = (Invite.due_at <= timestamp, Invite.lease_until <= timestamp)
     with sessions.begin() as session:
