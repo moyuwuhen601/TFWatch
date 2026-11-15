@@ -15,6 +15,9 @@ from tfwatch.testflight import Observation
 
 
 def test_channels_preferences_retry_and_unknown_dedup(app, client, monkeypatch):
+    timestamp = now()
+    monkeypatch.setattr("tfwatch.catalog.now", lambda: timestamp)
+    monkeypatch.setattr("tfwatch.checks.randint", lambda low, high: low)
     user = register(client)
     client.post("/api/apps", json={"url": URL})
     client.put(f"/api/invites/{CODE}/follow")
@@ -42,7 +45,6 @@ def test_channels_preferences_retry_and_unknown_dedup(app, client, monkeypatch):
         assert b"my-token" not in encrypted
         assert session.get(Channel, channel["id"]).user_id == user["id"]
 
-    timestamp = now()
     for offset, status in [(0, "full"), (300, "open"), (600, "unknown"), (1200, "open"), (1500, "closed")]:
         assert record_check(sessions, *claim_invite(sessions, timestamp + offset),
                             Observation(status), timestamp + offset, enqueue)
@@ -59,9 +61,10 @@ def test_channels_preferences_retry_and_unknown_dedup(app, client, monkeypatch):
         assert process_delivery(sessions, app.state.config, timestamp + 1600)
     assert not process_delivery(sessions, app.state.config, timestamp + 1600)
     assert process_delivery(sessions, app.state.config, timestamp + 1660)
-    assert {item[1] for item in sent if item[0] == hook_url} == {"open"}
+    private_events = [(status, headers) for url, status, headers in sent if url == hook_url]
+    assert {status for status, _ in private_events} == {"open"}
+    assert all(headers["Authorization"] == "Bearer my-token" for _, headers in private_events)
     assert sent[0] == sent[-1]
-    assert sent[0][2]["Authorization"] == "Bearer my-token"
     assert len({item[2]["Idempotency-Key"] for item in sent}) == 3
     with sessions() as session:
         assert sorted(session.scalars(select(Delivery.attempts)).all()) == [1, 1, 2]

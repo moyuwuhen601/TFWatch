@@ -1,7 +1,12 @@
+from random import randint
+
 from sqlalchemy import select, update
 
-from .db import now
 from .models import App, CheckLog, Invite, Settings, StatusEvent
+
+
+def first_check_due(timestamp):
+    return timestamp + randint(0, 30)
 
 
 def claim_invite(sessions, timestamp):
@@ -29,8 +34,11 @@ def record_check(sessions, code, lease, observation, timestamp, enqueue=None):
         interval = session.get(Settings, 1).interval
         status = observation.status
         invite.failures = min(invite.failures + 1, 6) if status == "unknown" else 0
-        backoff = min(interval * (2 ** invite.failures), 3600)
-        invite.due_at = timestamp + (max(interval, backoff) if invite.failures else interval)
+        if invite.failures:
+            delay = min(interval * (2 ** invite.failures), 3600)
+        else:
+            delay = interval + randint(0, min(interval // 10, 30))
+        invite.due_at = timestamp + delay
         invite.lease_until = 0
         session.add(CheckLog(code=code, checked_at=timestamp, status=status, interval=interval))
 

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
+from .checks import first_check_due
 from .db import now
 from .models import App, CheckLog, Invite, StatusEvent, Subscription
 from .security import browsing, db, limit, user_required
@@ -107,7 +108,7 @@ def submit(data: Submission, request: Request, user=Depends(user_required), sess
     if existing:
         return {"app_id": existing.app_id, "code": code, "duplicate": True}
 
-    limit(request, "submission", 12, 3600, user.id)
+    limit(request, "submission", 60, 3600, user.id)
     if data.app_id:
         app = session.get(App, data.app_id)
         if app is None:
@@ -117,7 +118,7 @@ def submit(data: Submission, request: Request, user=Depends(user_required), sess
         session.add(app)
     try:
         session.flush()
-        invite = Invite(code=code, app_id=app.id)
+        invite = Invite(code=code, app_id=app.id, due_at=first_check_due(now()))
         session.add(invite)
         session.commit()
     except IntegrityError:

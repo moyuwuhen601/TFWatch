@@ -6,6 +6,7 @@ import pytest
 from conftest import register
 from tfwatch.checks import claim_invite, record_check
 from tfwatch.db import now
+from tfwatch.models import Invite
 from tfwatch.testflight import Observation, check, invite_code, parse_page
 from tfwatch.timeline import summarize
 
@@ -58,15 +59,18 @@ def test_only_apple_public_invites(url):
     assert invite_code(URL + "/?share=1#ignored") == CODE
 
 
-def test_shared_catalog_claims_and_public_timeline(app, client):
+def test_shared_catalog_claims_and_public_timeline(app, client, monkeypatch):
+    timestamp = now() - 25 * 60
+    monkeypatch.setattr("tfwatch.checks.randint", lambda low, high: low)
     assert client.post("/api/apps", json={"url": URL}).status_code == 401
     register(client)
-    created = client.post("/api/apps", json={"url": URL}).json()
+    with monkeypatch.context() as context:
+        context.setattr("tfwatch.catalog.now", lambda: timestamp)
+        created = client.post("/api/apps", json={"url": URL}).json()
     assert not created["duplicate"]
     assert client.post("/api/apps", json={"url": URL + "?share=1"}).json() == {**created, "duplicate": True}
 
     sessions = app.state.sessions
-    timestamp = now() - 25 * 60
     code, lease = claim_invite(sessions, timestamp)
     assert not claim_invite(sessions, timestamp)
     assert not record_check(sessions, code, lease + 1, Observation("full"), timestamp)
@@ -82,6 +86,35 @@ def test_shared_catalog_claims_and_public_timeline(app, client):
     assert summary["open_periods"] == 2
     assert summary["observed_open_seconds"] == 300
     assert [event["status"] for event in summary["events"]] == ["closed", "open", "unknown", "open"]
+
+
+def test_many_submissions_are_staggered_and_claimed_when_due(app, client, monkeypatch):
+    timestamp = now()
+    offsets = iter(range(20, 4, -1))
+
+    def draw_offset(low, high):
+        assert (low, high) == (0, 30)
+        return next(offsets)
+
+    monkeypatch.setattr("tfwatch.catalog.now", lambda: timestamp)
+    monkeypatch.setattr("tfwatch.checks.randint", draw_offset)
+    register(client)
+    codes = [f"Queue{i:03d}" for i in range(16)]
+    for code in codes:
+        response = client.post("/api/apps", json={"url": f"https://testflight.apple.com/join/{code}"})
+        assert response.status_code == 202
+        assert not response.json()["duplicate"]
+
+    sessions = app.state.sessions
+    assert claim_invite(sessions, timestamp + 4) is None
+    code, lease = claim_invite(sessions, timestamp + 5)
+    assert code == codes[-1]
+    monkeypatch.setattr("tfwatch.checks.randint", lambda low, high: high)
+    assert record_check(sessions, code, lease, Observation("open"), timestamp + 5)
+    with sessions() as session:
+        assert session.get(Invite, code).due_at == timestamp + 5 + 300 + 30
+    assert claim_invite(sessions, timestamp + 5) is None
+    assert claim_invite(sessions, timestamp + 6)[0] == codes[-2]
 
 
 def test_time_gap_does_not_count_as_open_duration():
