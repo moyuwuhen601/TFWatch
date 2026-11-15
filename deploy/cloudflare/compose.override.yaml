@@ -1,0 +1,12 @@
+services:
+  api:
+    command:
+      - uvicorn
+      - tfwatch.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - "${TFWATCH_NGINX_TRUSTED_IP:?Set the Nginx peer IP seen by the API}"
